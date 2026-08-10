@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: customer_care
+      POSTGRES_PASSWORD: customer_care
+      POSTGRES_DB: customer_care
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U customer_care -d customer_care"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  # Used by later modules (rate limiting, OTP cache). Not required yet.
+  redis:
+    image: redis:7-alpine
+    profiles: ["full"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "6379:6379"
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://customer_care:customer_care@db:5432/customer_care
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      EXPOSE_OTP_IN_RESPONSE: "true"
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000"]}
+    command: >
+      sh -c "uv run alembic upgrade head &&
+             uv run uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./alembic:/app/alembic
+
+volumes:
+  postgres_data:
